@@ -1,0 +1,77 @@
+/* src/styles/rtl.css */
+
+/* RTL Support */
+[dir="rtl"] {
+  text-align: right;
+}
+
+[dir="ltr"] {
+  text-align: left;
+}
+
+/* Fix input placeholders */
+[dir="rtl"] input::placeholder,
+[dir="rtl"] textarea::placeholder {
+  text-align: right;
+}
+
+[dir="ltr"] input::placeholder,
+[dir="ltr"] textarea::placeholder {
+  text-align: left;
+}
+
+/* Fix number inputs to always be LTR */
+input[type="tel"],
+input[type="number"],
+input[type="email"],
+input[type="password"] {
+  direction: ltr;
+  text-align: left;
+}
+
+/* Tailwind RTL utilities */
+[dir="rtl"] .rtl\:space-x-reverse > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-x-reverse: 1;
+}
+
+[dir="rtl"] .rtl\:text-right {
+  text-align: right;
+}
+
+[dir="rtl"] .rtl\:text-left {
+  text-align: left;
+}
+
+/* Fix flexbox for RTL */
+[dir="rtl"] .flex-row {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .flex-row-reverse {
+  flex-direction: row;
+}
+
+/* Fix grid for RTL */
+[dir="rtl"] .grid {
+  direction: rtl;
+}
+
+/* Fix modals and dropdowns */
+[dir="rtl"] .origin-top-right {
+  transform-origin: top left;
+}
+
+[dir="rtl"] .origin-top-left {
+  transform-origin: top right;
+}
+
+/* Fix icons positioning */
+[dir="rtl"] .icon-right {
+  right: auto;
+  left: 0.75rem;
+}
+
+[dir="rtl"] .icon-left {
+  left: auto;
+  right: 0.75rem;
+}

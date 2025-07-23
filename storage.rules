@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // إيصالات الدفع - كل مستخدم يرفع إيصالاته فقط
+    match /payment-receipts/{courseId}/{fileName} {
+      allow write: if request.auth != null &&
+        request.resource.contentType.matches('image/.*') &&
+        request.resource.size < 5 * 1024 * 1024; // 5 ميجا
+      allow read: if request.auth != null;
+    }
+    
+    // ملفات المحادثة
+    match /chat-files/{conversationId}/{fileName} {
+      allow write: if request.auth != null &&
+        request.resource.size < 10 * 1024 * 1024 && // 10 ميجا
+        conversationId.matches('.*' + request.auth.uid + '.*');
+      allow read: if request.auth != null &&
+        conversationId.matches('.*' + request.auth.uid + '.*');
+    }
+    
+    // منع كل شيء آخر
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
