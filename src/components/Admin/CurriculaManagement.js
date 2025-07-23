@@ -216,7 +216,7 @@ const CurriculaManagement = () => {
       },
       progressSettings: {
         ...curriculum.progressSettings,
-        allowSelfPromotion: false // التأكد من تعطيلها دائماً
+        allowSelfPromotion: false 
       } || {
         allowLevelPromotion: true,
         requireAdminApproval: true,
@@ -256,7 +256,7 @@ const CurriculaManagement = () => {
       const cleanLearningOutcomes = curriculumData.learningOutcomes.filter(outcome => outcome.trim());
       const cleanLevels = curriculumData.levels.map(level => ({
         ...level,
-        sessionsCount: parseInt(level.sessionsCount) || 12, // التأكد من تحويلها لرقم
+        sessionsCount: parseInt(level.sessionsCount) || 12,
         topics: level.topics.filter(topic => topic.trim())
       }));
 
@@ -282,7 +282,7 @@ const CurriculaManagement = () => {
         },
         progressSettings: {
           ...curriculumData.progressSettings,
-          allowSelfPromotion: false, // تعطيل طلب الترقية من الطالب
+          allowSelfPromotion: false, 
           minimumCompletionRate: parseInt(curriculumData.progressSettings.minimumCompletionRate)
         }
       };
@@ -311,7 +311,7 @@ const CurriculaManagement = () => {
       topics: [''],
       duration: '',
       durationDays: '30',
-      sessionsCount: '12', // إضافة الحقل الجديد عند إضافة مرحلة
+      sessionsCount: '12', 
       order: curriculumData.levels.length + 1
     };
     setCurriculumData({
@@ -424,7 +424,7 @@ const CurriculaManagement = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <h2 className="text-3xl font-bold text-gray-800">إدارة المناهج التعليمية</h2>
         <div className="flex items-center gap-4">
           <div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg">
@@ -461,7 +461,7 @@ const CurriculaManagement = () => {
 
               <div>
                 <label className="block font-medium mb-2">الفئة</label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <select
                     value={curriculumData.category}
                     onChange={(e) => setCurriculumData({...curriculumData, category: e.target.value})}
@@ -535,12 +535,12 @@ const CurriculaManagement = () => {
               </div>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-              <h4 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 sm:p-6">
+              <h4 className="text-lg font-semibold mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
                 <Users className="text-blue-600" size={20} />
-                إعدادات المجموعات التعليمية
+                <span>إعدادات المجموعات التعليمية</span>
               </h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className="block font-medium mb-2">الحد الأدنى</label>
                   <input
@@ -578,7 +578,7 @@ const CurriculaManagement = () => {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className="block font-medium mb-2">مدة الجلسة (دقيقة)</label>
                   <input
@@ -642,7 +642,7 @@ const CurriculaManagement = () => {
               </div>
             </div>
             
-            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 sm:p-6">
               <h4 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <Star className="text-green-600" size={20} />
                 إعدادات التقييم والترقية
@@ -693,7 +693,7 @@ const CurriculaManagement = () => {
             
             <div>
               <label className="block font-medium mb-3">خطط الاشتراك والأسعار</label>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {curriculumData.subscriptionPlans.map((plan, index) => (
                   <div key={plan.type} className="border rounded-lg p-4">
                     <label className="block font-medium mb-2">{plan.label}</label>
@@ -723,12 +723,12 @@ const CurriculaManagement = () => {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex flex-col sm:flex-row items-center justify-between mb-3 gap-2">
                 <label className="block font-medium">المراحل التعليمية</label>
                 <button
                   type="button"
                   onClick={addLevel}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 self-start sm:self-center"
                 >
                   <Plus size={16} />
                   إضافة مرحلة
@@ -751,8 +751,8 @@ const CurriculaManagement = () => {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                      <div className="md:col-span-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                      <div className="lg:col-span-2">
                         <label className="block font-medium mb-2">عنوان المرحلة</label>
                         <input
                           type="text"
@@ -896,7 +896,7 @@ const CurriculaManagement = () => {
               />
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <button
                 type="submit"
                 disabled={isLoading}
@@ -927,10 +927,10 @@ const CurriculaManagement = () => {
               )}
               
               <div className="p-6">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col sm:flex-row items-start justify-between mb-4 gap-2">
                   <div>
                     <h3 className="text-xl font-semibold mb-2">{curriculum.title}</h3>
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
                       <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
                         {curriculum.category}
                       </span>
@@ -947,7 +947,7 @@ const CurriculaManagement = () => {
                     </div>
                   </div>
                   
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 self-start sm:self-center flex-shrink-0">
                     <button
                       onClick={() => handleEdit(curriculum)}
                       className="text-blue-600 hover:text-blue-700 p-2"
@@ -1068,7 +1068,7 @@ const CurriculaManagement = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       onClick={() => toggleCurriculumStatus(curriculum)}
                       className={`px-4 py-2 rounded-lg transition-colors text-sm ${

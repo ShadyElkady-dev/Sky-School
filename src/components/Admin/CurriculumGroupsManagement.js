@@ -101,16 +101,14 @@ const CurriculumGroupsManagement = () => {
     return filteredGroups;
   };
 
-  // --- إصلاح الخطأ البرمجي هنا ---
   const getCurriculumStudents = (curriculumId) => {
     const curriculum = curricula.find(c => c.id === curriculumId);
     if (!curriculum) return [];
 
-    // طلاب لديهم اشتراك نشط في المنهج
     const activeSubscriptions = subscriptions.filter(sub => 
       sub.curriculumId === curriculumId && 
       sub.status === 'active' &&
-      sub.currentLevelAccessExpiresAt && // التأكد من وجود الحقل قبل استخدامه
+      sub.currentLevelAccessExpiresAt && 
       new Date(sub.currentLevelAccessExpiresAt.toDate()) > new Date()
     );
 
@@ -465,7 +463,7 @@ const CurriculumGroupsManagement = () => {
         </h3>
         
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
               <label className="block font-medium mb-2">اسم المجموعة</label>
               <input type="text" value={groupData.name} onChange={(e) => setGroupData({...groupData, name: e.target.value})} className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500" placeholder="مثال: مجموعة المبتدئين أ" required />
@@ -479,7 +477,7 @@ const CurriculumGroupsManagement = () => {
               <input type="number" value={groupData.maxSize} onChange={(e) => setGroupData({...groupData, maxSize: parseInt(e.target.value)})} className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500" min="5" max="50" required />
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
               <label className="block font-medium mb-2">المدرب المخصص</label>
               <select value={groupData.trainerId} onChange={(e) => setGroupData({...groupData, trainerId: e.target.value})} className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500">
@@ -506,13 +504,13 @@ const CurriculumGroupsManagement = () => {
               <input type="date" value={groupData.startDate} onChange={(e) => setGroupData({...groupData, startDate: e.target.value})} className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500" required />
             </div>
           </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 sm:p-6">
             <h4 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Calendar className="text-blue-600" size={20} />
               جدولة المجموعة
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="sm:col-span-2 lg:col-span-1">
                 <label className="block font-medium mb-2">أيام الأسبوع</label>
                 <div className="space-y-2">
                   {daysOfWeek.map(day => (
@@ -554,12 +552,12 @@ const CurriculumGroupsManagement = () => {
               </div>
             </div>
           </div>
-          <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 sm:p-6">
             <h4 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Settings className="text-green-600" size={20} />
               إعدادات المجموعة
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block font-medium mb-2">الحد الأقصى للغيابات</label>
                 <input type="number" value={groupData.groupSettings.maxAbsences} onChange={(e) => setGroupData({ ...groupData, groupSettings: { ...groupData.groupSettings, maxAbsences: parseInt(e.target.value) } })} className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500" min="0" max="10" />
@@ -612,11 +610,11 @@ const CurriculumGroupsManagement = () => {
             </div>
           )}
           <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-2">
               <h4 className="text-lg font-semibold">
                 اختيار الطلاب ({groupData.students.length}/{groupData.maxSize})
               </h4>
-              <div className="flex gap-2">
+              <div className="flex gap-2 self-start sm:self-center">
                 <button type="button" onClick={autoFillGroup} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm flex items-center gap-2">
                   <Copy size={16} />
                   تعبئة تلقائية
@@ -708,11 +706,11 @@ const CurriculumGroupsManagement = () => {
               </div>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="submit"
               disabled={loading || groupData.students.length === 0}
-              className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <Save size={18} />
               {loading ? 'جاري الحفظ...' : editingGroup ? 'تحديث المجموعة' : 'إنشاء المجموعة'}
@@ -819,7 +817,7 @@ const CurriculumGroupsManagement = () => {
 
       {selectedCurriculum && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-blue-50 rounded-xl p-4 text-center">
               <BookOpen className="mx-auto text-blue-600 mb-2" size={24} />
               <p className="text-2xl font-bold text-blue-900">{getCurriculumStudents(selectedCurriculum.id).length}</p>
@@ -850,16 +848,16 @@ const CurriculumGroupsManagement = () => {
           </div>
 
           <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-col sm:flex-row flex-wrap items-center gap-4">
               <button
                 onClick={() => setShowCreateGroup(true)}
-                className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 w-full sm:w-auto"
               >
                 <Plus size={20} />
                 إنشاء مجموعة جديدة
               </button>
 
-              <div className="flex-1 min-w-64">
+              <div className="flex-1 min-w-full sm:min-w-64">
                 <div className="relative">
                   <Search className="absolute right-3 top-3 text-gray-400" size={20} />
                   <input
@@ -875,7 +873,7 @@ const CurriculumGroupsManagement = () => {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500"
+                className="border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500 w-full sm:w-auto"
               >
                 <option value="all">جميع الحالات</option>
                 <option value="pending">قيد الإنشاء</option>

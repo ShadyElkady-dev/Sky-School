@@ -226,7 +226,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             <button
               key={item.path}
               onClick={() => handleNavigate(item.path)}
-                              className={`w-full text-right px-3 sm:px-4 py-2 sm:py-3 rounded-lg flex items-center gap-2 sm:gap-3 transition-colors text-sm sm:text-base ${
+              className={`w-full text-right px-3 sm:px-4 py-2 sm:py-3 rounded-lg flex items-center gap-2 sm:gap-3 transition-colors text-sm sm:text-base ${
                 isActive ? 'bg-purple-100 text-purple-900' : 'hover:bg-gray-100'
               }`}
             >
@@ -242,11 +242,11 @@ const Sidebar = ({ isOpen, onClose }) => {
 
   return (
     <aside className={`
-      ${isOpen ? 'translate-x-0' : '-translate-x-full'} 
+      ${isOpen ? 'translate-x-0' : 'translate-x-full'} 
       lg:translate-x-0 
       fixed lg:relative 
       top-0 lg:top-auto 
-      left-0 lg:left-auto 
+      right-0 lg:right-auto 
       w-64 sm:w-72 lg:w-64 
       bg-white 
       shadow-xl 
