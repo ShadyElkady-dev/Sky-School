@@ -1,10 +1,10 @@
 // src/components/Student/StudentCurriculumPage.js
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, BookOpen, Play, CheckCircle, Lock, Clock, 
-  Star, Award, Target, MessageCircle, Calendar, Users,
-  ChevronRight, ChevronDown, AlertCircle, BarChart3
+import {
+  ArrowLeft, BookOpen, Play, CheckCircle, Lock, Clock,
+  Star, Award, Target, MessageCircle, Calendar,
+  ChevronRight, ChevronDown, AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -21,7 +21,7 @@ const StudentCurriculumPage = () => {
   const [loading, setLoading] = useState(true);
   const [expandedLevel, setExpandedLevel] = useState(null);
   const [chatWithAdmin, setChatWithAdmin] = useState(false);
-  
+
   const { data: subscriptions } = useCollection('subscriptions', [
     where('studentId', '==', userProfile.id),
     where('curriculumId', '==', id),
@@ -29,13 +29,12 @@ const StudentCurriculumPage = () => {
   ]);
 
   const { data: users } = useCollection('users');
-  
-  // --- جديد: جلب جلسات الحضور الخاصة بالطالب لهذا المنهج ---
-  const { data: attendanceSessions } = useCollection('curriculumAttendanceSessions', [
-    where('curriculumId', '==', id)
-    // الفلترة الدقيقة ستتم في الكود لضمان جلب كل البيانات المطلوبة
-  ]);
 
+  // --- جديد: جلب جلسات الحضور الخاصة بالطالب لهذا المنهج ---
+  const { data: attendanceSessions } = useCollection(
+  'curriculumAttendanceSessions', 
+  id ? [where('curriculumId', '==', id)] : []
+  );
 
   useEffect(() => {
     const fetchCurriculum = async () => {
@@ -56,41 +55,92 @@ const StudentCurriculumPage = () => {
     fetchCurriculum();
   }, [id, navigate]);
 
-  const activeSubscription = subscriptions.find(sub => 
+  const activeSubscription = subscriptions.find(sub =>
     sub.currentLevelAccessExpiresAt && new Date(sub.currentLevelAccessExpiresAt.toDate()) > new Date()
   );
 
   const calculateOverallProgress = () => {
     if (!activeSubscription || !curriculum?.levels) return 0;
-    
+  
     const totalLevels = curriculum.levels.length;
     const completedLevels = activeSubscription.progress?.completedLevels?.length || 0;
-    
-    const progressPercentage = (completedLevels / totalLevels) * 100;
-    return Math.min(progressPercentage, 100);
+    const currentLevel = activeSubscription.currentLevel || 1;
+  
+    // حساب التقدم بناءً على المراحل المكتملة + تقدم المرحلة الحالية
+    let overallProgress = (completedLevels / totalLevels) * 100;
+  
+    // إضافة تقدم المرحلة الحالية إذا لم تكن مكتملة بعد
+    if (currentLevel <= totalLevels && !activeSubscription.progress?.completedLevels?.includes(currentLevel)) {
+      const currentLevelProgress = calculateCurrentLevelProgress();
+      const currentLevelWeight = (1 / totalLevels) * 100; // وزن المرحلة الحالية
+      overallProgress += (currentLevelProgress / 100) * currentLevelWeight;
+    }
+  
+    return Math.min(overallProgress, 100);
   };
 
-  // --- جديد: دالة حساب التقدم في المرحلة الحالية ---
   const calculateCurrentLevelProgress = () => {
-    if (!activeSubscription || !curriculum?.levels || !attendanceSessions) return 0;
-    
+      if (!activeSubscription || !curriculum?.levels || !attendanceSessions || !userProfile?.id) {
+    return 0;
+  }
+  
     const currentLevelNumber = activeSubscription.currentLevel || 1;
+  
+    // التحقق من أن المرحلة مكتملة بالفعل
+    if (activeSubscription.progress?.completedLevels?.includes(currentLevelNumber)) {
+      return 100; // المرحلة مكتملة
+    }
+  
     const currentLevelData = curriculum.levels.find(l => l.order === currentLevelNumber);
     if (!currentLevelData || !currentLevelData.sessionsCount) return 0;
-
-    const totalSessionsInLevel = currentLevelData.sessionsCount;
-
+  
+    const totalSessionsInLevel = parseInt(currentLevelData.sessionsCount);
+    if (totalSessionsInLevel === 0) return 100;
+  
     // فلترة الجلسات التي حضرها الطالب في المرحلة الحالية
     const attendedSessionsCount = attendanceSessions.filter(session => {
       const studentAttendance = session.attendance?.find(att => att.studentId === userProfile.id);
-      return session.level === currentLevelNumber && studentAttendance && (studentAttendance.status === 'present' || studentAttendance.status === 'late');
+      return session.level === currentLevelNumber &&
+             studentAttendance &&
+             (studentAttendance.status === 'present' || studentAttendance.status === 'late');
     }).length;
-
-    if (totalSessionsInLevel === 0) return 100; // إذا لم يكن هناك جلسات مطلوبة، تعتبر مكتملة
+  
     const progress = (attendedSessionsCount / totalSessionsInLevel) * 100;
-    return Math.min(progress, 100); // التأكد من عدم تجاوز 100%
+    return Math.min(progress, 100);
   };
 
+  const canPromoteToNextLevel = () => {
+    if (!activeSubscription || !curriculum?.levels) return false;
+  
+    const currentLevel = activeSubscription.currentLevel || 1;
+    const totalLevels = curriculum.levels.length;
+  
+    // التحقق من وجود مرحلة تالية
+    if (currentLevel >= totalLevels) return false;
+  
+    // التحقق من التقدم في المرحلة الحالية
+    const currentLevelProgress = calculateCurrentLevelProgress();
+    const minimumCompletionRate = curriculum.progressSettings?.minimumCompletionRate || 80;
+  
+    if (currentLevelProgress < minimumCompletionRate) return false;
+  
+    // التحقق من رصيد الأيام
+    const nextLevelData = curriculum.levels.find(l => l.order === currentLevel + 1);
+    const requiredDays = parseInt(nextLevelData?.durationDays) || 30;
+  
+    return (activeSubscription.accessCreditDays || 0) >= requiredDays;
+  };
+
+  const getRemainingDaysInCurrentLevel = () => {
+    if (!activeSubscription?.currentLevelAccessExpiresAt) return null;
+  
+    const now = new Date();
+    const expiry = new Date(activeSubscription.currentLevelAccessExpiresAt.toDate());
+    const diffTime = expiry - now;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  
+    return diffDays;
+  };
 
   const canAccessLevel = (levelIndex) => {
     if (!activeSubscription) return false;
@@ -142,10 +192,11 @@ const StudentCurriculumPage = () => {
     );
   }
 
-  const overallProgress = calculateOverallProgress();
   const currentLevelProgress = calculateCurrentLevelProgress();
+  const overallProgress = calculateOverallProgress();
+  const canPromote = canPromoteToNextLevel();
+  const remainingDays = getRemainingDaysInCurrentLevel();
   const admin = getAdmin();
-  const daysLeft = Math.ceil((new Date(activeSubscription.currentLevelAccessExpiresAt.toDate()) - new Date()) / (1000 * 60 * 60 * 24));
 
   if (chatWithAdmin && admin) {
     return (
@@ -165,12 +216,13 @@ const StudentCurriculumPage = () => {
           <ArrowLeft size={20} /> العودة لمناهجي
         </button>
         <div className="flex items-center gap-4">
-          {daysLeft >= 0 && (
-            <div className={`px-4 py-2 rounded-lg ${daysLeft <= 7 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-              <Calendar size={16} className="inline ml-2" />
-              {daysLeft > 0 ? `${daysLeft} يوم متبقي للوصول لهذه المرحلة` : 'آخر يوم للوصول'}
-            </div>
-          )}
+{remainingDays !== null && remainingDays >= 0 && (
+  <div className={`px-4 py-2 rounded-lg ${remainingDays <= 7 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+    <Calendar size={16} className="inline ml-2" />
+    {remainingDays > 0 ? `${remainingDays} يوم متبقي للوصول لهذه المرحلة` : 'آخر يوم للوصول'}
+  </div>
+)}
+
         </div>
       </div>
       <div className="bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl text-white p-8">
@@ -181,21 +233,39 @@ const StudentCurriculumPage = () => {
             
             <div className="mb-4">
               <div className="flex justify-between text-sm mb-2">
-                <span>التقدم في المرحلة الحالية (حسب الحضور)</span>
-                <span>{currentLevelProgress.toFixed(0)}%</span>
+                <span>التقدم في المرحلة الحالية</span>
+                <span className={`font-semibold ${canPromote ? 'text-green-600' : 'text-blue-600'}`}>
+                  {currentLevelProgress.toFixed(1)}%
+                </span>
               </div>
               <div className="w-full bg-white/20 rounded-full h-3">
                 <div 
-                  className="bg-green-400 h-3 rounded-full transition-all duration-300"
+                  className={`h-3 rounded-full transition-all duration-300 ${
+                    canPromote ? 'bg-green-400' : 'bg-blue-400'
+                  }`}
                   style={{ width: `${currentLevelProgress}%` }}
                 ></div>
               </div>
+              {canPromote && (
+                <div className="flex items-center gap-1 mt-1 text-xs text-green-200">
+                  <CheckCircle size={12} />
+                  <span>جاهز للترقية للمرحلة التالية</span>
+                </div>
+              )}
+              {!canPromote && currentLevelProgress < 80 && (
+                <div className="flex items-center gap-1 mt-1 text-xs text-yellow-200">
+                  <Clock size={12} />
+                  <span>
+                    يحتاج {(80 - currentLevelProgress).toFixed(1)}% إضافية للترقية
+                  </span>
+                </div>
+              )}
             </div>
-            
+
             <div className="mb-4">
               <div className="flex justify-between text-sm mb-2">
                 <span>التقدم الإجمالي في المنهج</span>
-                <span>{overallProgress.toFixed(0)}%</span>
+                <span>{overallProgress.toFixed(1)}%</span>
               </div>
               <div className="w-full bg-white/20 rounded-full h-3">
                 <div 
@@ -226,14 +296,30 @@ const StudentCurriculumPage = () => {
               <img src={curriculum.image} alt={curriculum.title} className="w-full h-32 object-cover rounded-lg mb-4" />
             )}
             <div className="bg-white/10 rounded-lg p-4">
-              <h3 className="font-semibold mb-2">اشتراكك</h3>
-              <p className="text-sm text-purple-100 mb-1">
-                رصيد الأيام المتبقي: 
-                <span className="font-bold text-white"> {activeSubscription.accessCreditDays || 0} يوم</span>
-              </p>
-              <p className="text-sm text-purple-100">
-                ينتهي الوصول للمرحلة الحالية: {new Date(activeSubscription.currentLevelAccessExpiresAt.toDate()).toLocaleDateString('ar-EG')}
-              </p>
+              <h3 className="font-semibold mb-3">معلومات الاشتراك</h3>
+              <div className="space-y-2 text-sm text-purple-100">
+                <div className="flex justify-between">
+                  <span>رصيد الأيام المتبقي:</span>
+                  <span className="font-bold text-white">
+                    {activeSubscription.accessCreditDays || 0} يوم
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>انتهاء المرحلة الحالية:</span>
+                  <span className={`font-medium ${remainingDays <= 7 ? 'text-red-200' : 'text-white'}`}>
+                    {remainingDays > 0 ? `${remainingDays} يوم` : 'انتهى اليوم'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>حالة الترقية:</span>
+                  <span className={`font-medium ${canPromote ? 'text-green-200' : 'text-yellow-200'}`}>
+                    {canPromote ? '✅ جاهز للمرحلة التالية' : '⏳ يحتاج مزيد من التقدم'}
+                  </span>
+                </div>
+                <div className="text-xs text-purple-200 mt-2 pt-2 border-t border-white/20">
+                  تاريخ انتهاء المرحلة: {new Date(activeSubscription.currentLevelAccessExpiresAt.toDate()).toLocaleDateString('ar-EG')}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -250,10 +336,21 @@ const StudentCurriculumPage = () => {
                 const isCompleted = isLevelCompleted(index);
                 const isCurrent = activeSubscription.currentLevel === index + 1;
                 
+                // إضافة حساب التقدم لكل مرحلة
+                let levelProgress = 0;
+                if (isCompleted) {
+                  levelProgress = 100;
+                } else if (isCurrent) {
+                  levelProgress = calculateCurrentLevelProgress();
+                }
+
+                const isReadyForPromotion = isCurrent && canPromoteToNextLevel();
+
                 return (
                   <div 
                     key={index}
                     className={`border rounded-xl p-6 transition-all ${
+                      isReadyForPromotion ? 'border-green-500 bg-green-50 shadow-lg' :
                       isCurrent ? 'border-purple-500 bg-purple-50' :
                       isCompleted ? 'border-green-500 bg-green-50' :
                       canAccess ? 'border-blue-500 bg-blue-50' :
@@ -264,12 +361,14 @@ const StudentCurriculumPage = () => {
                       <div className="flex items-center gap-4">
                         <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold ${
                           isCompleted ? 'bg-green-600 text-white' :
+                          isReadyForPromotion ? 'bg-green-600 text-white animate-pulse' :
                           isCurrent ? 'bg-purple-600 text-white' :
                           canAccess ? 'bg-blue-600 text-white' :
                           'bg-gray-400 text-white'
                         }`}>
-                          {isCompleted ? <CheckCircle size={24} /> :
-                           isCurrent ? <Play size={24} /> :
+                          {isCompleted ? <CheckCircle size={24} /> : 
+                           isReadyForPromotion ? <Award size={24} /> : 
+                           isCurrent ? <Play size={24} /> : 
                            <Lock size={24} />}
                         </div>
                         
@@ -278,18 +377,42 @@ const StudentCurriculumPage = () => {
                             المرحلة {index + 1}: {level.title}
                           </h3>
                           {level.durationDays && (
-                            <p className="text-sm text-gray-600">المدة المخصصة: {level.durationDays} يوم ({level.sessionsCount} جلسة)</p>
+                            <p className="text-sm text-gray-600">
+                              المدة المخصصة: {level.durationDays} يوم ({level.sessionsCount} جلسة)
+                            </p>
+                          )}
+                          {isCurrent && (
+                            <div className="mt-2">
+                              <div className="flex items-center gap-2 text-sm">
+                                <div className="w-20 bg-gray-200 rounded-full h-2">
+                                  <div 
+                                    className={`h-2 rounded-full transition-all ${
+                                      levelProgress >= 80 ? 'bg-green-500' : 'bg-purple-500'
+                                    }`}
+                                    style={{ width: `${levelProgress}%` }}
+                                  ></div>
+                                </div>
+                                <span className={`font-medium ${levelProgress >= 80 ? 'text-green-600' : 'text-purple-600'}`}>
+                                  {levelProgress.toFixed(1)}%
+                                </span>
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-2">
                         {isCompleted && (
-                          <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">
+                          <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">
                             مكتملة
                           </span>
                         )}
-                        {isCurrent && (
+                        {isReadyForPromotion && (
+                          <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold animate-pulse">
+                            🎉 جاهز للترقية!
+                          </span>
+                        )}
+                        {isCurrent && !isReadyForPromotion && (
                           <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm">
                             جاري التعلم
                           </span>

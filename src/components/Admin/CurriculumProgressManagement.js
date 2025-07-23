@@ -1,13 +1,11 @@
 // src/components/Admin/CurriculumProgressManagement.js
 import React, { useState } from 'react';
 import { 
-  TrendingUp, Users, Calendar, Target, Award, 
-  CheckCircle, XCircle, Clock, BookOpen, User,
-  BarChart3, Eye, Edit, Save, Star, AlertCircle,
-  Play, Pause, RefreshCw, Download, Filter, Search
+  TrendingUp, Users, Target, Award, 
+  XCircle, Clock, AlertCircle,
+  BarChart3, Eye, RefreshCw, Search
 } from 'lucide-react';
 import { useCollection } from '../../hooks/useFirestore';
-import { where, orderBy } from 'firebase/firestore';
 
 const CurriculumProgressManagement = () => {
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
@@ -20,8 +18,33 @@ const CurriculumProgressManagement = () => {
   const { data: subscriptions, update: updateSubscription } = useCollection('subscriptions');
   const { data: curriculumGroups, update: updateGroup } = useCollection('curriculumGroups');
   const { data: users } = useCollection('users');
+  const { data: attendanceSessions } = useCollection('curriculumAttendanceSessions', []);
   
   const students = users.filter(u => u.role === 'student');
+
+  const calculateStudentCurrentLevelProgress = (studentId, curriculumId, currentLevel) => {
+      if (!studentId || !curriculumId || !currentLevel || !attendanceSessions) {
+    return 0;
+  }
+  
+  const curriculum = curricula.find(c => c.id === curriculumId);
+  if (!curriculum?.levels) return 0;
+    const currentLevelData = curriculum.levels.find(l => l.order === currentLevel);
+    if (!currentLevelData || !currentLevelData.sessionsCount) return 0;
+    const totalSessionsInLevel = parseInt(currentLevelData.sessionsCount);
+    // فلترة الجلسات التي حضرها الطالب في المرحلة الحالية
+    const attendedSessionsCount = attendanceSessions.filter(session => {
+        const studentAttendance = session.attendance?.find(att => att.studentId === studentId);
+  return session.curriculumId === curriculumId && // إضافة هذا الشرط المهم
+         session.level === currentLevel &&
+         studentAttendance &&
+         (studentAttendance.status === 'present' || studentAttendance.status === 'late');
+}).length;
+
+    if (totalSessionsInLevel === 0) return 100;
+    const progress = (attendedSessionsCount / totalSessionsInLevel) * 100;
+    return Math.min(progress, 100);
+  };
 
   const getCurriculumProgressStats = (curriculumId) => {
     const curriculum = curricula.find(c => c.id === curriculumId);
@@ -146,12 +169,12 @@ const CurriculumProgressManagement = () => {
         sub.curriculumId === curriculumId &&
         sub.status === 'active'
       );
-
+  
       if (!subscription) {
         alert('لم يتم العثور على اشتراك نشط للطالب');
         return;
       }
-
+  
       const curriculum = curricula.find(c => c.id === curriculumId);
       if (!curriculum || !curriculum.levels) {
         alert('لم يتم العثور على المنهج');
@@ -160,16 +183,26 @@ const CurriculumProgressManagement = () => {
       
       const currentLevel = subscription.currentLevel || 1;
       const totalLevels = curriculum.levels.length;
-
+  
       if (currentLevel >= totalLevels) {
         alert('الطالب وصل للمرحلة الأخيرة');
         return;
       }
-
+  
+      // ===== الجديد: التحقق من اكتمال المرحلة الحالية =====
+      const currentLevelProgress = calculateStudentCurrentLevelProgress(studentId, curriculumId, currentLevel);
+      const minimumCompletionRate = curriculum.progressSettings?.minimumCompletionRate || 80;
+  
+      if (currentLevelProgress < minimumCompletionRate) {
+        alert(`لا يمكن ترقية الطالب. يجب إكمال ${minimumCompletionRate}% على الأقل من المرحلة الحالية. التقدم الحالي: ${currentLevelProgress.toFixed(1)}%`);
+        return;
+      }
+  
+      // التحقق من الرصيد
       const newLevel = currentLevel + 1;
       const nextLevelData = curriculum.levels.find(l => l.order === newLevel);
       const levelDuration = parseInt(nextLevelData?.durationDays) || 30;
-
+  
       if (subscription.accessCreditDays < levelDuration) {
         alert(`لا يمكن ترقية الطالب. الرصيد المتبقي (${subscription.accessCreditDays} يوم) غير كافٍ لتغطية المرحلة التالية (${levelDuration} يوم).`);
         return;
@@ -178,12 +211,23 @@ const CurriculumProgressManagement = () => {
       const newCredit = subscription.accessCreditDays - levelDuration;
       const newExpiryDate = new Date();
       newExpiryDate.setDate(newExpiryDate.getDate() + levelDuration);
-
+  
       const completedLevels = subscription.progress?.completedLevels || [];
       if (!completedLevels.includes(currentLevel)) {
         completedLevels.push(currentLevel);
       }
-
+  
+      // ===== الجديد: تسجيل تفاصيل الترقية =====
+      const promotionDetails = {
+        promotedAt: new Date(),
+        promotedBy: 'admin',
+        fromLevel: currentLevel,
+        toLevel: newLevel,
+        progressAtPromotion: currentLevelProgress,
+        creditsDeducted: levelDuration,
+        remainingCredits: newCredit
+      };
+  
       await updateSubscription(subscription.id, {
         currentLevel: newLevel,
         accessCreditDays: newCredit,
@@ -192,14 +236,15 @@ const CurriculumProgressManagement = () => {
           ...subscription.progress,
           completedLevels,
           lastUpdate: new Date(),
-          promotedBy: 'admin'
+          lastPromotion: promotionDetails
         }
       });
-
-      alert(`تم ترقية الطالب للمرحلة ${newLevel} بنجاح!`);
+  
+      alert(`تم ترقية الطالب للمرحلة ${newLevel} بنجاح! \nالتقدم في المرحلة السابقة: ${currentLevelProgress.toFixed(1)}% \nالرصيد المتبقي: ${newCredit} يوم`);
+  
     } catch (error) {
       console.error('Error promoting student:', error);
-      alert('حدث خطأ في ترقية الطالب');
+      alert('حدث خطأ في ترقية الطالب: ' + error.message);
     }
   };
 
@@ -263,28 +308,63 @@ const CurriculumProgressManagement = () => {
       const nextLevelData = curriculum.levels.find(l => l.order === newLevel);
       const levelDuration = parseInt(nextLevelData?.durationDays) || 30;
   
-      // التحقق من رصيد كل الطلاب قبل أي إجراء
-      const studentsWithInsufficientCredit = [];
+      // ===== الجديد: التحقق من جاهزية جميع الطلاب =====
       const groupStudents = group.students || [];
+      const studentsReadiness = [];
+  
       for (const studentId of groupStudents) {
         const subscription = subscriptions.find(sub => sub.studentId === studentId && sub.curriculumId === group.curriculumId && sub.status === 'active');
-        if (!subscription || subscription.accessCreditDays < levelDuration) {
+        if (!subscription) {
           const student = users.find(u => u.id === studentId);
-          studentsWithInsufficientCredit.push({
+          studentsReadiness.push({
+            studentId,
             name: student ? `${student.firstName} ${student.lastName}` : `ID: ${studentId}`,
-            credit: subscription?.accessCreditDays || 0
+            ready: false,
+            reason: 'لا يوجد اشتراك نشط'
           });
+          continue;
         }
+  
+        const currentLevelProgress = calculateStudentCurrentLevelProgress(studentId, group.curriculumId, currentLevel);
+        const minimumCompletionRate = curriculum.progressSettings?.minimumCompletionRate || 80;
+        const hasEnoughCredit = subscription.accessCreditDays >= levelDuration;
+  
+        const student = users.find(u => u.id === studentId);
+        studentsReadiness.push({
+          studentId,
+          name: student ? `${student.firstName} ${student.lastName}` : `ID: ${studentId}`,
+          ready: currentLevelProgress >= minimumCompletionRate && hasEnoughCredit,
+          progress: currentLevelProgress,
+          credit: subscription.accessCreditDays,
+          reason: !hasEnoughCredit ? `رصيد غير كافٍ (${subscription.accessCreditDays} يوم)` :
+                  currentLevelProgress < minimumCompletionRate ? `تقدم غير كافٍ (${currentLevelProgress.toFixed(1)}%)` : 'جاهز'
+        });
       }
   
-      // إذا كان هناك طلاب غير مؤهلين، أوقف العملية وأبلغ المدير
-      if (studentsWithInsufficientCredit.length > 0) {
-        const studentList = studentsWithInsufficientCredit.map(s => `${s.name} (الرصيد: ${s.credit} يوم)`).join('\n');
-        alert(`لا يمكن ترقية المجموعة. الطلاب التاليون ليس لديهم رصيد أيام كافٍ (${levelDuration} يوم مطلوب):\n\n${studentList}\n\nيرجى التواصل معهم لإضافة رصيد.`);
+      const readyStudents = studentsReadiness.filter(s => s.ready);
+      const notReadyStudents = studentsReadiness.filter(s => !s.ready);
+  
+      // إذا كان هناك طلاب غير جاهزين، اعرض الخيارات
+      if (notReadyStudents.length > 0) {
+        const notReadyList = notReadyStudents.map(s => `${s.name}: ${s.reason}`).join('\n');
+        const readyList = readyStudents.map(s => s.name).join('\n');
+  
+        const message = `الطلاب غير الجاهزين للترقية (${notReadyStudents.length}):\n${notReadyList}\n\nالطلاب الجاهزين (${readyStudents.length}):\n${readyList}\n\nهل تريد ترقية الطلاب الجاهزين فقط؟`;
+  
+        if (!window.confirm(message)) {
+          return;
+        }
+  
+        // ترقية الطلاب الجاهزين فقط
+        for (const readyStudent of readyStudents) {
+          await promoteStudent(readyStudent.studentId, group.curriculumId);
+        }
+  
+        alert(`تم ترقية ${readyStudents.length} طالب من أصل ${groupStudents.length}. \n${notReadyStudents.length} طالب لم يتم ترقيتهم لعدم استيفاء الشروط.`);
         return;
       }
   
-      // إذا كان جميع الطلاب مؤهلين، قم بترقيتهم واحداً تلو الآخر
+      // إذا كان جميع الطلاب جاهزين، قم بترقيتهم جميعاً
       for (const studentId of groupStudents) {
         await promoteStudent(studentId, group.curriculumId);
       }
@@ -344,20 +424,29 @@ const CurriculumProgressManagement = () => {
   };
 
   const getFilteredStudents = (studentStats) => {
-    let filtered = studentStats;
-
+    let filtered = studentStats.map(studentStat => {
+        // إضافة حساب التقدم في المرحلة الحالية
+        const currentLevelProgress = calculateStudentCurrentLevelProgress(
+            studentStat.student.id,
+            selectedCurriculum.id,
+            studentStat.currentLevel
+        );
+        return {
+            ...studentStat,
+            currentLevelProgress,
+            canPromote: currentLevelProgress >= (selectedCurriculum.progressSettings?.minimumCompletionRate || 80)
+        };
+    });
     if (filterMode !== 'all') {
-      filtered = filtered.filter(s => s.status === filterMode);
+        filtered = filtered.filter(s => s.status === filterMode);
     }
-
     if (searchTerm) {
-      filtered = filtered.filter(s =>
-        s.student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.student.phone.includes(searchTerm)
-      );
+        filtered = filtered.filter(s =>
+            s.student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            s.student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            s.student.phone.includes(searchTerm)
+        );
     }
-
     return filtered;
   };
 
