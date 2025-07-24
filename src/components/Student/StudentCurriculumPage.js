@@ -98,12 +98,13 @@ const StudentCurriculumPage = () => {
     if (totalSessionsInLevel === 0) return 100;
   
     // فلترة الجلسات التي حضرها الطالب في المرحلة الحالية
-    const attendedSessionsCount = attendanceSessions.filter(session => {
-      const studentAttendance = session.attendance?.find(att => att.studentId === userProfile.id);
-      return session.level === currentLevelNumber &&
-             studentAttendance &&
-             (studentAttendance.status === 'present' || studentAttendance.status === 'late');
-    }).length;
+const attendedSessionsCount = attendanceSessions.filter(session => {
+  const studentAttendance = session.attendance?.find(att => att.studentId === userProfile.id);
+  return session.curriculumId === id && // ← إضافة هذا السطر
+         session.level === currentLevelNumber &&
+         studentAttendance &&
+         (studentAttendance.status === 'present' || studentAttendance.status === 'late');
+}).length;
   
     const progress = (attendedSessionsCount / totalSessionsInLevel) * 100;
     return Math.min(progress, 100);

@@ -34,6 +34,7 @@ const CurriculumProgressManagement = () => {
     const totalSessionsInLevel = parseInt(currentLevelData.sessionsCount);
     // فلترة الجلسات التي حضرها الطالب في المرحلة الحالية
     const attendedSessionsCount = attendanceSessions.filter(session => {
+
         const studentAttendance = session.attendance?.find(att => att.studentId === studentId);
   return session.curriculumId === curriculumId && // إضافة هذا الشرط المهم
          session.level === currentLevel &&
