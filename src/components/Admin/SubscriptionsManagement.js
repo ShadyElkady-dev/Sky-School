@@ -1,6 +1,6 @@
 // src/components/Admin/SubscriptionsManagement.js
 import React, { useState } from 'react';
-import { CheckCircle, XCircle, DollarSign, Clock, Users, Calendar, Eye, Search, Filter, RefreshCw, AlertCircle, ChevronDown, X, User, BookOpen, CreditCard } from 'lucide-react';
+import { CheckCircle, XCircle, DollarSign, Clock, Users, Calendar, Eye, Search, Filter, RefreshCw, AlertCircle, ChevronDown, X, User, BookOpen, CreditCard, Plus, Coins } from 'lucide-react';
 import { useCollection } from '../../hooks/useFirestore';
 import { orderBy, where } from 'firebase/firestore';
 import { useNotifications } from '../../hooks/useNotifications';
@@ -9,7 +9,8 @@ const SubscriptionsManagement = () => {
   const { data: subscriptions, loading, update } = useCollection('subscriptions', [orderBy('createdAt', 'desc')]);
   const { data: users } = useCollection('users');
   const { data: curricula } = useCollection('curricula');
-  const { sendSubscriptionStatusNotification } = useNotifications();
+  const { add: addCreditHistory } = useCollection('creditHistory');
+  const { sendSubscriptionStatusNotification, sendCreditAddedNotification } = useNotifications();
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -17,6 +18,7 @@ const SubscriptionsManagement = () => {
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
+  const [showAddCreditModal, setShowAddCreditModal] = useState(false);
 
   const handleSubscriptionConfirmation = async (subscription, status) => {
     setIsProcessing(true);
@@ -86,29 +88,156 @@ const SubscriptionsManagement = () => {
     setIsProcessing(false);
   };
   
+  // وظيفة إضافة رصيد الأيام - جديدة
+  const addCreditDays = async (subscription, daysToAdd, reason) => {
+    setIsProcessing(true);
+    try {
+      const oldCredit = subscription.accessCreditDays || 0;
+      const newCredit = oldCredit + parseInt(daysToAdd);
+      
+      // تحديث الاشتراك
+      await update(subscription.id, {
+        accessCreditDays: newCredit,
+        status: 'active',
+        lastCreditUpdate: new Date(),
+        renewedAt: new Date(),
+        renewedBy: 'admin'
+      });
+
+      // إضافة سجل في التاريخ
+      await addCreditHistory({
+        studentId: subscription.studentId,
+        studentName: subscription.studentName,
+        curriculumId: subscription.curriculumId,
+        curriculumName: subscription.curriculumTitle,
+        subscriptionId: subscription.id,
+        oldCredit,
+        newCredit,
+        addedDays: parseInt(daysToAdd),
+        reason: reason || 'إضافة رصيد من الإدارة',
+        isPromotion: false,
+        adminId: 'current-admin-id', // يجب استبداله بـ ID الأدمن الحقيقي
+        adminName: 'Admin',
+        createdAt: new Date()
+      });
+
+      // إرسال إشعار للطالب
+      sendCreditAddedNotification(
+        subscription.studentId,
+        parseInt(daysToAdd),
+        subscription.curriculumTitle,
+        newCredit
+      );
+
+      alert(`تم إضافة ${daysToAdd} يوماً لرصيد الطالب بنجاح! الرصيد الجديد: ${newCredit} يوماً.`);
+      setShowAddCreditModal(false);
+      setSelectedSubscription(null);
+    } catch (error) {
+      console.error('Error adding credit:', error);
+      alert('حدث خطأ في إضافة الرصيد');
+    }
+    setIsProcessing(false);
+  };
+
   const renewSubscription = async (subscription) => {
     const daysToAdd = prompt("كم عدد الأيام التي تريد إضافتها لرصيد الطالب؟", "30");
     if (!daysToAdd || isNaN(parseInt(daysToAdd)) || parseInt(daysToAdd) <= 0) {
       return;
     }
     
-    setIsProcessing(true);
-    try {
-      const newCredit = (subscription.accessCreditDays || 0) + parseInt(daysToAdd);
-      
-      await update(subscription.id, {
-        accessCreditDays: newCredit,
-        status: 'active', 
-        renewedAt: new Date(),
-        renewedBy: 'admin'
-      });
-      
-      alert(`تم إضافة ${daysToAdd} يوماً لرصيد الطالب بنجاح! الرصيد الجديد: ${newCredit} يوماً.`);
-    } catch (error) {
-      console.error('Error renewing subscription:', error);
-      alert('حدث خطأ في تجديد الاشتراك');
-    }
-    setIsProcessing(false);
+    const reason = prompt("سبب إضافة الرصيد (اختياري):", "تجديد الاشتراك");
+    await addCreditDays(subscription, daysToAdd, reason);
+  };
+
+  // مكون Modal لإضافة الرصيد - جديد
+  const AddCreditModal = () => {
+    const [formData, setFormData] = useState({
+      daysToAdd: '',
+      reason: ''
+    });
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      if (!formData.daysToAdd || parseInt(formData.daysToAdd) <= 0) {
+        alert('يرجى إدخال عدد أيام صحيح');
+        return;
+      }
+
+      await addCreditDays(selectedSubscription, formData.daysToAdd, formData.reason);
+    };
+
+    if (!selectedSubscription) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-xl max-w-md w-full p-6">
+          <h3 className="text-xl font-semibold mb-4">إضافة رصيد أيام</h3>
+          
+          <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+            <h4 className="font-medium mb-2">معلومات الطالب:</h4>
+            <p><strong>الاسم:</strong> {selectedSubscription.studentName}</p>
+            <p><strong>المنهج:</strong> {selectedSubscription.curriculumTitle}</p>
+            <p><strong>الرصيد الحالي:</strong> {selectedSubscription.accessCreditDays || 0} يوم</p>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block font-medium mb-2">عدد الأيام المراد إضافتها</label>
+              <input
+                type="number"
+                value={formData.daysToAdd}
+                onChange={(e) => setFormData({...formData, daysToAdd: e.target.value})}
+                className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500"
+                placeholder="مثال: 30"
+                required
+                min="1"
+                max="365"
+              />
+            </div>
+
+            <div>
+              <label className="block font-medium mb-2">السبب (اختياري)</label>
+              <textarea
+                value={formData.reason}
+                onChange={(e) => setFormData({...formData, reason: e.target.value})}
+                className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500"
+                rows="3"
+                placeholder="سبب إضافة الرصيد..."
+              />
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-medium text-blue-800 mb-2">معاينة العملية:</h4>
+              <div className="text-sm text-blue-700 space-y-1">
+                <p>• الرصيد الحالي: {selectedSubscription.accessCreditDays || 0} يوم</p>
+                <p>• الأيام المضافة: {formData.daysToAdd || 0} يوم</p>
+                <p>• الرصيد الجديد: {(selectedSubscription.accessCreditDays || 0) + parseInt(formData.daysToAdd || 0)} يوم</p>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                {isProcessing ? 'جاري الإضافة...' : 'إضافة الرصيد'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCreditModal(false);
+                  setSelectedSubscription(null);
+                }}
+                className="flex-1 bg-gray-400 text-white py-2 rounded-lg hover:bg-gray-500 transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
   };
 
   const getStudentName = (studentId) => {
@@ -177,10 +306,6 @@ const SubscriptionsManagement = () => {
     
     if (statusFilter !== 'all') {
       if (statusFilter === 'expired') {
-        filtered = filtered.filter(sub => 
-          (sub.status === 'active' && isExpired(sub)) || sub.status === 'expired'
-        );
-      } else {
         filtered = filtered.filter(sub => sub.status === statusFilter && !isExpired(sub));
       }
     }
@@ -316,10 +441,29 @@ const SubscriptionsManagement = () => {
               </>
             )}
             
+            {/* زر إضافة رصيد - جديد */}
+            {subscription.status === 'active' && (
+              <button
+                onClick={() => {
+                  setSelectedSubscription(subscription);
+                  setShowAddCreditModal(true);
+                }}
+                className="flex-1 bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
+                disabled={isProcessing}
+              >
+                <Plus size={16} />
+                إضافة رصيد
+              </button>
+            )}
+
+            {/* زر إضافة رصيد للمنتهيين - جديد */}
             {(subscription.status === 'active' && expired) && (
               <button
-                onClick={() => renewSubscription(subscription)}
-                className="flex-1 bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
+                onClick={() => {
+                  setSelectedSubscription(subscription);
+                  setShowAddCreditModal(true);
+                }}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
                 disabled={isProcessing}
               >
                 <RefreshCw size={16} />
@@ -377,9 +521,16 @@ const SubscriptionsManagement = () => {
                     <p className="text-sm text-gray-500">المرحلة الحالية: {subscription.currentLevel || 1}</p>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
-                      {subscription.accessCreditDays || 0} يوم
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                        (subscription.accessCreditDays || 0) <= 7 ? 'bg-red-100 text-red-800' :
+                        (subscription.accessCreditDays || 0) <= 30 ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        <Coins size={14} className="inline mr-1" />
+                        {subscription.accessCreditDays || 0} يوم
+                      </span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     {subscription.currentLevelAccessExpiresAt ? (
@@ -436,14 +587,18 @@ const SubscriptionsManagement = () => {
                         </>
                       )}
                       
-                      {(subscription.status === 'active' && expired) && (
+                      {/* زر إضافة رصيد - جديد */}
+                      {subscription.status === 'active' && (
                         <button
-                          onClick={() => renewSubscription(subscription)}
+                          onClick={() => {
+                            setSelectedSubscription(subscription);
+                            setShowAddCreditModal(true);
+                          }}
                           className="text-blue-600 hover:text-blue-900 transition-colors"
                           disabled={isProcessing}
                           title="إضافة رصيد أيام"
                         >
-                          <RefreshCw size={20} />
+                          <Plus size={20} />
                         </button>
                       )}
 
@@ -705,6 +860,9 @@ const SubscriptionsManagement = () => {
           </div>
         </div>
       )}
+
+      {/* Add Credit Modal - جديد */}
+      {showAddCreditModal && <AddCreditModal />}
 
       {/* Processing Overlay */}
       {isProcessing && (
