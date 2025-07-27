@@ -2,10 +2,11 @@
 import React, { useState } from 'react';
 import { 
   TrendingUp, Users, Target, Award, 
-  XCircle, Clock, AlertCircle,
-  BarChart3, Eye, RefreshCw, Search
+  XCircle, Clock, AlertCircle, Plus, Coins,
+  BarChart3, Eye, RefreshCw, Search, CreditCard
 } from 'lucide-react';
 import { useCollection } from '../../hooks/useFirestore';
+import { useNotifications } from '../../hooks/useNotifications';
 
 const CurriculumProgressManagement = () => {
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
@@ -13,34 +14,40 @@ const CurriculumProgressManagement = () => {
   const [viewMode, setViewMode] = useState('overview'); // overview, groups, students, analytics
   const [filterMode, setFilterMode] = useState('all'); // all, excellent, good, warning, critical
   const [searchTerm, setSearchTerm] = useState('');
+  const [showAddCreditModal, setShowAddCreditModal] = useState(false);
+  const [selectedStudents, setSelectedStudents] = useState([]);
   
   const { data: curricula } = useCollection('curricula');
   const { data: subscriptions, update: updateSubscription } = useCollection('subscriptions');
   const { data: curriculumGroups, update: updateGroup } = useCollection('curriculumGroups');
   const { data: users } = useCollection('users');
   const { data: attendanceSessions } = useCollection('curriculumAttendanceSessions', []);
+  const { add: addCreditHistory } = useCollection('creditHistory');
+  const { sendCreditAddedNotification } = useNotifications();
   
   const students = users.filter(u => u.role === 'student');
 
   const calculateStudentCurrentLevelProgress = (studentId, curriculumId, currentLevel) => {
-      if (!studentId || !curriculumId || !currentLevel || !attendanceSessions) {
-    return 0;
-  }
+    if (!studentId || !curriculumId || !currentLevel || !attendanceSessions) {
+      return 0;
+    }
   
-  const curriculum = curricula.find(c => c.id === curriculumId);
-  if (!curriculum?.levels) return 0;
+    const curriculum = curricula.find(c => c.id === curriculumId);
+    if (!curriculum?.levels) return 0;
+    
     const currentLevelData = curriculum.levels.find(l => l.order === currentLevel);
     if (!currentLevelData || !currentLevelData.sessionsCount) return 0;
+    
     const totalSessionsInLevel = parseInt(currentLevelData.sessionsCount);
+    
     // فلترة الجلسات التي حضرها الطالب في المرحلة الحالية
     const attendedSessionsCount = attendanceSessions.filter(session => {
-
-        const studentAttendance = session.attendance?.find(att => att.studentId === studentId);
-  return session.curriculumId === curriculumId && // إضافة هذا الشرط المهم
-         session.level === currentLevel &&
-         studentAttendance &&
-         (studentAttendance.status === 'present' || studentAttendance.status === 'late');
-}).length;
+      const studentAttendance = session.attendance?.find(att => att.studentId === studentId);
+      return session.curriculumId === curriculumId &&
+             session.level === currentLevel &&
+             studentAttendance &&
+             (studentAttendance.status === 'present' || studentAttendance.status === 'late');
+    }).length;
 
     if (totalSessionsInLevel === 0) return 100;
     const progress = (attendedSessionsCount / totalSessionsInLevel) * 100;
@@ -82,6 +89,13 @@ const CurriculumProgressManagement = () => {
       const daysLeft = subscription.currentLevelAccessExpiresAt ? 
           Math.ceil((new Date(subscription.currentLevelAccessExpiresAt.toDate()) - new Date()) / (1000 * 60 * 60 * 24)) : 0;
 
+      // --- إضافة حساب حالة الرصيد ---
+      const creditDays = subscription.accessCreditDays || 0;
+      let creditStatus = 'high';
+      if (creditDays <= 3) creditStatus = 'critical';
+      else if (creditDays <= 7) creditStatus = 'low';
+      else if (creditDays <= 30) creditStatus = 'medium';
+
       return {
         student,
         subscription,
@@ -91,7 +105,9 @@ const CurriculumProgressManagement = () => {
         status,
         daysSinceUpdate,
         isExpiringSoon,
-        daysLeft
+        daysLeft,
+        creditDays,
+        creditStatus
       };
     }).filter(Boolean);
 
@@ -102,6 +118,11 @@ const CurriculumProgressManagement = () => {
     const criticalStudents = studentStats.filter(s => s.status === 'critical').length;
     const avgProgress = totalStudents > 0 ? 
       studentStats.reduce((sum, s) => sum + s.progressPercentage, 0) / totalStudents : 0;
+
+    // --- إضافة إحصائيات الرصيد ---
+    const lowCreditStudents = studentStats.filter(s => s.creditStatus === 'low' || s.creditStatus === 'critical').length;
+    const avgCredit = totalStudents > 0 ? 
+      studentStats.reduce((sum, s) => sum + s.creditDays, 0) / totalStudents : 0;
 
     return {
       curriculum,
@@ -115,7 +136,9 @@ const CurriculumProgressManagement = () => {
       warningStudents,
       criticalStudents,
       studentStats: studentStats.sort((a, b) => b.progressPercentage - a.progressPercentage),
-      expiringSoon: studentStats.filter(s => s.isExpiringSoon).length
+      expiringSoon: studentStats.filter(s => s.isExpiringSoon).length,
+      lowCreditStudents,
+      avgCredit
     };
   };
 
@@ -163,6 +186,69 @@ const CurriculumProgressManagement = () => {
     };
   };
 
+  // --- دالة إضافة رصيد الأيام - محدثة ---
+  const addCreditDays = async (studentIds, daysToAdd, reason, isPromotion = false) => {
+    try {
+      const results = [];
+      
+      for (const studentId of studentIds) {
+        const subscription = subscriptions.find(sub => 
+          sub.studentId === studentId && 
+          sub.curriculumId === selectedCurriculum.id &&
+          sub.status === 'active'
+        );
+        
+        if (!subscription) continue;
+
+        const oldCredit = subscription.accessCreditDays || 0;
+        const newCredit = oldCredit + parseInt(daysToAdd);
+        
+        // تحديث الاشتراك
+        await updateSubscription(subscription.id, {
+          accessCreditDays: newCredit,
+          lastCreditUpdate: new Date(),
+          status: 'active'
+        });
+
+        // البحث عن بيانات الطالب
+        const student = students.find(s => s.id === studentId);
+        const studentName = student ? `${student.firstName} ${student.lastName}` : 'غير معروف';
+
+        // إضافة سجل في التاريخ
+        await addCreditHistory({
+          studentId,
+          studentName,
+          curriculumId: subscription.curriculumId,
+          curriculumName: subscription.curriculumTitle || selectedCurriculum.title,
+          subscriptionId: subscription.id,
+          oldCredit,
+          newCredit,
+          addedDays: parseInt(daysToAdd),
+          reason,
+          isPromotion,
+          adminId: 'current-admin-id', // يجب استبداله بـ ID الأدمن الحقيقي
+          adminName: 'Admin',
+          createdAt: new Date()
+        });
+
+        // إرسال إشعار للطالب
+        sendCreditAddedNotification(
+          studentId,
+          parseInt(daysToAdd),
+          subscription.curriculumTitle || selectedCurriculum.title,
+          newCredit
+        );
+
+        results.push({ studentId, oldCredit, newCredit, success: true });
+      }
+
+      return results;
+    } catch (error) {
+      console.error('Error adding credit:', error);
+      throw error;
+    }
+  };
+
   const promoteStudent = async (studentId, curriculumId) => {
     try {
       const subscription = subscriptions.find(sub => 
@@ -190,7 +276,7 @@ const CurriculumProgressManagement = () => {
         return;
       }
   
-      // ===== الجديد: التحقق من اكتمال المرحلة الحالية =====
+      // التحقق من اكتمال المرحلة الحالية
       const currentLevelProgress = calculateStudentCurrentLevelProgress(studentId, curriculumId, currentLevel);
       const minimumCompletionRate = curriculum.progressSettings?.minimumCompletionRate || 80;
   
@@ -218,7 +304,7 @@ const CurriculumProgressManagement = () => {
         completedLevels.push(currentLevel);
       }
   
-      // ===== الجديد: تسجيل تفاصيل الترقية =====
+      // تسجيل تفاصيل الترقية
       const promotionDetails = {
         promotedAt: new Date(),
         promotedBy: 'admin',
@@ -271,7 +357,7 @@ const CurriculumProgressManagement = () => {
 
       const newLevel = currentLevel - 1;
       const completedLevels = (subscription.progress?.completedLevels || [])
-        .filter(level => level < newLevel); // الرجوع خطوة للخلف
+        .filter(level => level < newLevel);
 
       await updateSubscription(subscription.id, {
         currentLevel: newLevel,
@@ -290,7 +376,6 @@ const CurriculumProgressManagement = () => {
     }
   };
   
-  // --- دالة ترقية المجموعة (مُعاد هيكلتها بالكامل) ---
   const promoteGroup = async (groupId) => {
     try {
       const group = curriculumGroups.find(g => g.id === groupId);
@@ -309,7 +394,7 @@ const CurriculumProgressManagement = () => {
       const nextLevelData = curriculum.levels.find(l => l.order === newLevel);
       const levelDuration = parseInt(nextLevelData?.durationDays) || 30;
   
-      // ===== الجديد: التحقق من جاهزية جميع الطلاب =====
+      // التحقق من جاهزية جميع الطلاب
       const groupStudents = group.students || [];
       const studentsReadiness = [];
   
@@ -426,7 +511,6 @@ const CurriculumProgressManagement = () => {
 
   const getFilteredStudents = (studentStats) => {
     let filtered = studentStats.map(studentStat => {
-        // إضافة حساب التقدم في المرحلة الحالية
         const currentLevelProgress = calculateStudentCurrentLevelProgress(
             studentStat.student.id,
             selectedCurriculum.id,
@@ -438,9 +522,11 @@ const CurriculumProgressManagement = () => {
             canPromote: currentLevelProgress >= (selectedCurriculum.progressSettings?.minimumCompletionRate || 80)
         };
     });
+    
     if (filterMode !== 'all') {
         filtered = filtered.filter(s => s.status === filterMode);
     }
+    
     if (searchTerm) {
         filtered = filtered.filter(s =>
             s.student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -448,6 +534,7 @@ const CurriculumProgressManagement = () => {
             s.student.phone.includes(searchTerm)
         );
     }
+    
     return filtered;
   };
 
@@ -470,8 +557,145 @@ const CurriculumProgressManagement = () => {
       default: return 'غير محدد';
     }
   };
-  
-  // (بقية الكود الخاص بعرض الواجهة لم يتغير وسيتم إضافته كاملاً هنا)
+
+  const getCreditStatusColor = (status) => {
+    switch (status) {
+      case 'critical': return 'bg-red-100 text-red-800 border-red-300';
+      case 'low': return 'bg-orange-100 text-orange-800 border-orange-300';
+      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+      case 'high': return 'bg-green-100 text-green-800 border-green-300';
+      default: return 'bg-gray-100 text-gray-800 border-gray-300';
+    }
+  };
+
+  // --- مكون Modal لإضافة الرصيد ---
+  const AddCreditModal = () => {
+    const [formData, setFormData] = useState({
+      daysToAdd: '',
+      reason: '',
+      applyToAll: false
+    });
+    const [loading, setLoading] = useState(false);
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      if (!formData.daysToAdd || parseInt(formData.daysToAdd) <= 0) {
+        alert('يرجى إدخال عدد أيام صحيح');
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const stats = getCurriculumProgressStats(selectedCurriculum.id);
+        const targetStudents = formData.applyToAll ? 
+          stats.studentStats.map(item => item.student.id) : 
+          selectedStudents;
+
+        if (targetStudents.length === 0) {
+          alert('يرجى اختيار طلاب أو تفعيل "تطبيق على الكل"');
+          return;
+        }
+
+        await addCreditDays(
+          targetStudents, 
+          formData.daysToAdd, 
+          formData.reason || 'إضافة رصيد من الإدارة'
+        );
+
+        alert(`تم إضافة ${formData.daysToAdd} يوماً لـ ${targetStudents.length} طالب بنجاح!`);
+        setShowAddCreditModal(false);
+        setSelectedStudents([]);
+        setFormData({ daysToAdd: '', reason: '', applyToAll: false });
+      } catch (error) {
+        alert('حدث خطأ في إضافة الرصيد: ' + error.message);
+      }
+      setLoading(false);
+    };
+
+    if (!selectedCurriculum) return null;
+    
+    const stats = getCurriculumProgressStats(selectedCurriculum.id);
+    const filteredStudents = getFilteredStudents(stats.studentStats);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-xl max-w-md w-full p-6">
+          <h3 className="text-xl font-semibold mb-4">إضافة رصيد أيام - {selectedCurriculum.title}</h3>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block font-medium mb-2">عدد الأيام المراد إضافتها</label>
+              <input
+                type="number"
+                value={formData.daysToAdd}
+                onChange={(e) => setFormData({...formData, daysToAdd: e.target.value})}
+                className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500"
+                placeholder="مثال: 30"
+                required
+                min="1"
+                max="365"
+              />
+            </div>
+
+            <div>
+              <label className="block font-medium mb-2">السبب (اختياري)</label>
+              <textarea
+                value={formData.reason}
+                onChange={(e) => setFormData({...formData, reason: e.target.value})}
+                className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500"
+                rows="3"
+                placeholder="سبب إضافة الرصيد..."
+              />
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-4">
+              <label className="flex items-center gap-2 mb-2">
+                <input
+                  type="checkbox"
+                  checked={formData.applyToAll}
+                  onChange={(e) => setFormData({...formData, applyToAll: e.target.checked})}
+                  className="rounded"
+                />
+                <span>تطبيق على جميع الطلاب المفلترين ({filteredStudents.length} طالب)</span>
+              </label>
+              
+              {!formData.applyToAll && (
+                <p className="text-sm text-gray-600">
+                  سيتم تطبيق الإضافة على {selectedStudents.length} طالب محدد
+                </p>
+              )}
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-medium text-blue-800 mb-2">معاينة العملية:</h4>
+              <div className="text-sm text-blue-700 space-y-1">
+                <p>• عدد الطلاب: {formData.applyToAll ? filteredStudents.length : selectedStudents.length}</p>
+                <p>• الأيام المضافة: {formData.daysToAdd || 0} يوم لكل طالب</p>
+                <p>• إجمالي الأيام: {(formData.daysToAdd || 0) * (formData.applyToAll ? filteredStudents.length : selectedStudents.length)} يوم</p>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'جاري الإضافة...' : 'إضافة الرصيد'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddCreditModal(false)}
+                className="flex-1 bg-gray-400 text-white py-2 rounded-lg hover:bg-gray-500 transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
   
   const OverviewTab = () => {
     if (!selectedCurriculum) return null;
@@ -481,7 +705,7 @@ const CurriculumProgressManagement = () => {
 
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
           <div className="bg-blue-50 rounded-xl p-4 text-center">
             <Users className="mx-auto text-blue-600 mb-2" size={24} />
             <p className="text-2xl font-bold text-blue-900">{stats.totalStudents}</p>
@@ -510,6 +734,13 @@ const CurriculumProgressManagement = () => {
             <XCircle className="mx-auto text-red-600 mb-2" size={24} />
             <p className="text-2xl font-bold text-red-900">{stats.criticalStudents}</p>
             <p className="text-gray-600 text-sm">يحتاجون تدخل</p>
+          </div>
+
+          {/* --- إضافة بطاقة رصيد الأيام --- */}
+          <div className="bg-orange-50 rounded-xl p-4 text-center">
+            <Coins className="mx-auto text-orange-600 mb-2" size={24} />
+            <p className="text-2xl font-bold text-orange-900">{stats.avgCredit.toFixed(1)}</p>
+            <p className="text-gray-600 text-sm">متوسط الرصيد</p>
           </div>
         </div>
 
@@ -551,7 +782,8 @@ const CurriculumProgressManagement = () => {
           </div>
         </div>
 
-        {(stats.expiringSoon > 0 || stats.criticalStudents > 0) && (
+        {/* --- إضافة قسم تنبيهات الرصيد --- */}
+        {(stats.expiringSoon > 0 || stats.criticalStudents > 0 || stats.lowCreditStudents > 0) && (
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h3 className="text-xl font-semibold mb-4 text-red-600">تنبيهات مهمة</h3>
             
@@ -567,6 +799,32 @@ const CurriculumProgressManagement = () => {
                   <p className="text-orange-700 text-sm mt-1">
                     يُنصح بالتواصل معهم لإضافة رصيد أيام
                   </p>
+                </div>
+              )}
+              
+              {stats.lowCreditStudents > 0 && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2">
+                    <Coins className="text-yellow-600" size={20} />
+                    <span className="font-semibold text-yellow-800">
+                      {stats.lowCreditStudents} طالب لديهم رصيد منخفض (≤7 أيام)
+                    </span>
+                  </div>
+                  <p className="text-yellow-700 text-sm mt-1">
+                    يحتاجون لإضافة رصيد أيام قبل انتهاء وصولهم
+                  </p>
+                  <button
+                    onClick={() => {
+                      const lowCreditStudents = stats.studentStats
+                        .filter(item => item.creditStatus === 'low' || item.creditStatus === 'critical')
+                        .map(item => item.student.id);
+                      setSelectedStudents(lowCreditStudents);
+                      setShowAddCreditModal(true);
+                    }}
+                    className="mt-2 bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors text-sm"
+                  >
+                    إضافة رصيد للطلاب ذوي الرصيد المنخفض
+                  </button>
                 </div>
               )}
               
@@ -618,6 +876,9 @@ const CurriculumProgressManagement = () => {
                   <p className="text-xs text-gray-500">
                     {studentStat.completedLevels} مرحلة مكتملة
                   </p>
+                  <p className="text-xs text-blue-600">
+                    رصيد: {studentStat.creditDays} يوم
+                  </p>
                 </div>
               </div>
             ))}
@@ -638,7 +899,7 @@ const CurriculumProgressManagement = () => {
     return (
       <div className="space-y-6">
         <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4 mb-4">
             <div className="flex-1 min-w-64">
               <div className="relative">
                 <Search className="absolute right-3 top-3 text-gray-400" size={20} />
@@ -668,6 +929,30 @@ const CurriculumProgressManagement = () => {
               عرض {filteredStudents.length} من {stats.totalStudents} طالب
             </div>
           </div>
+
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setShowAddCreditModal(true)}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+            >
+              <Plus size={18} />
+              إضافة رصيد جماعي
+            </button>
+            
+            <div className="text-sm text-gray-600">
+              محدد: {selectedStudents.length} طالب
+            </div>
+            
+            <button
+              onClick={() => setSelectedStudents(
+                selectedStudents.length === filteredStudents.length ? 
+                [] : filteredStudents.map(item => item.student.id)
+              )}
+              className="text-purple-600 hover:text-purple-700 text-sm"
+            >
+              {selectedStudents.length === filteredStudents.length ? 'إلغاء التحديد' : 'تحديد الكل'}
+            </button>
+          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -675,9 +960,21 @@ const CurriculumProgressManagement = () => {
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                    <input
+                      type="checkbox"
+                      checked={selectedStudents.length === filteredStudents.length && filteredStudents.length > 0}
+                      onChange={() => setSelectedStudents(
+                        selectedStudents.length === filteredStudents.length ? 
+                        [] : filteredStudents.map(item => item.student.id)
+                      )}
+                      className="rounded"
+                    />
+                  </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الطالب</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">المرحلة الحالية</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">التقدم</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">رصيد الأيام</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الحالة</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">انتهاء الوصول</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الإجراءات</th>
@@ -686,6 +983,21 @@ const CurriculumProgressManagement = () => {
               <tbody className="divide-y divide-gray-200">
                 {filteredStudents.map(studentStat => (
                   <tr key={studentStat.student.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedStudents.includes(studentStat.student.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedStudents([...selectedStudents, studentStat.student.id]);
+                          } else {
+                            setSelectedStudents(selectedStudents.filter(id => id !== studentStat.student.id));
+                          }
+                        }}
+                        className="rounded"
+                      />
+                    </td>
+                    
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
@@ -698,9 +1010,6 @@ const CurriculumProgressManagement = () => {
                             {studentStat.student.firstName} {studentStat.student.lastName}
                           </p>
                           <p className="text-sm text-gray-600">{studentStat.student.phone}</p>
-                          <p className="text-xs text-blue-600 font-semibold">
-                             رصيد: {studentStat.subscription.accessCreditDays || 0} يوم
-                          </p>
                         </div>
                       </div>
                     </td>
@@ -720,6 +1029,9 @@ const CurriculumProgressManagement = () => {
                       <div className="w-full">
                         <div className="flex justify-between text-sm mb-1">
                           <span>{studentStat.progressPercentage.toFixed(1)}%</span>
+                          <span className="text-xs text-purple-600">
+                            {studentStat.currentLevelProgress?.toFixed(1)}% (مرحلة حالية)
+                          </span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div 
@@ -730,6 +1042,22 @@ const CurriculumProgressManagement = () => {
                             }`}
                             style={{ width: `${studentStat.progressPercentage}%` }}
                           ></div>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* --- إضافة عمود رصيد الأيام --- */}
+                    <td className="px-6 py-4">
+                      <div className="text-center">
+                        <span className={`px-3 py-1 rounded-full text-sm font-semibold border ${getCreditStatusColor(studentStat.creditStatus)}`}>
+                          <Coins size={14} className="inline mr-1" />
+                          {studentStat.creditDays} يوم
+                        </span>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {studentStat.creditStatus === 'critical' && 'حرج'}
+                          {studentStat.creditStatus === 'low' && 'منخفض'}
+                          {studentStat.creditStatus === 'medium' && 'متوسط'}
+                          {studentStat.creditStatus === 'high' && 'جيد'}
                         </div>
                       </div>
                     </td>
@@ -764,6 +1092,18 @@ const CurriculumProgressManagement = () => {
                     
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
+                        {/* زر إضافة رصيد فردي */}
+                        <button
+                          onClick={() => {
+                            setSelectedStudents([studentStat.student.id]);
+                            setShowAddCreditModal(true);
+                          }}
+                          className="text-green-600 hover:text-green-900 p-1 rounded"
+                          title="إضافة رصيد أيام"
+                        >
+                          <Plus size={16} />
+                        </button>
+
                         {studentStat.currentLevel < stats.totalLevels && (
                           <button
                             onClick={() => promoteStudent(studentStat.student.id, selectedCurriculum.id)}
@@ -935,9 +1275,18 @@ const CurriculumProgressManagement = () => {
                       <span className="text-gray-600">متوسط التقدم:</span>
                       <span className="font-semibold ml-2 text-green-600">{stats.avgProgress.toFixed(1)}%</span>
                     </p>
+                    <p className="text-sm">
+                      <span className="text-gray-600">متوسط الرصيد:</span>
+                      <span className="font-semibold ml-2 text-blue-600">{stats.avgCredit.toFixed(1)} يوم</span>
+                    </p>
                     {stats.criticalStudents > 0 && (
                       <p className="text-sm text-red-600">
                         ⚠️ {stats.criticalStudents} طالب يحتاج تدخل
+                      </p>
+                    )}
+                    {stats.lowCreditStudents > 0 && (
+                      <p className="text-sm text-orange-600">
+                        💰 {stats.lowCreditStudents} طالب رصيد منخفض
                       </p>
                     )}
                   </div>
@@ -986,6 +1335,15 @@ const CurriculumProgressManagement = () => {
               >
                 <Target size={18} />
                 المجموعات
+              </button>
+
+              {/* --- إضافة زر إدارة الرصيد --- */}
+              <button
+                onClick={() => setShowAddCreditModal(true)}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 ml-auto"
+              >
+                <CreditCard size={18} />
+                إدارة الرصيد
               </button>
             </div>
           </div>
@@ -1054,6 +1412,9 @@ const CurriculumProgressManagement = () => {
                                 <p className="text-sm text-gray-600">
                                   المرحلة {studentData.currentLevel} - {studentData.completedLevels} مكتملة
                                 </p>
+                                <p className="text-xs text-blue-600">
+                                  رصيد: {studentData.subscription.accessCreditDays || 0} يوم
+                                </p>
                               </div>
                             </div>
                             
@@ -1086,6 +1447,19 @@ const CurriculumProgressManagement = () => {
                           ترقية المجموعة كاملة
                         </button>
                       )}
+
+                      <button
+                        onClick={() => {
+                          const groupStudentIds = selectedGroup.students || [];
+                          setSelectedStudents(groupStudentIds);
+                          setShowAddCreditModal(true);
+                          setSelectedGroup(null);
+                        }}
+                        className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                      >
+                        <CreditCard size={18} />
+                        إضافة رصيد للمجموعة
+                      </button>
                       
                       <button
                         onClick={() => setSelectedGroup(null)}
@@ -1101,7 +1475,11 @@ const CurriculumProgressManagement = () => {
           </div>
         </div>
       )}
+
+      {/* Add Credit Modal */}
+      {showAddCreditModal && <AddCreditModal />}
     </div>
   );
 };
+
 export default CurriculumProgressManagement;
